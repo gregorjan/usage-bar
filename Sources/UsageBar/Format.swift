@@ -35,4 +35,10 @@ enum Format {
         let left = hours > 0 ? "\(hours)h \(minutes)m" : "\(minutes)m"
         return "\(formatter.string(from: date)) (in \(left))"
     }
+
+    static func compact(_ snapshot: AccountSnapshot) -> String {
+        guard snapshot.error == nil, !snapshot.windows.isEmpty else { return "—" }
+        return snapshot.windows.map { percent($0.percentUsed).replacingOccurrences(of: "%", with: "") }
+            .joined(separator: "/")
+    }
 }

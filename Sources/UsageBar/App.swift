@@ -35,6 +35,11 @@ final class StatusItemController {
         }
     }
 
+    private var merged: Bool {
+        get { UserDefaults.standard.bool(forKey: "merged") }
+        set { UserDefaults.standard.set(newValue, forKey: "merged") }
+    }
+
     private func render() {
         var keyed: [(String, AccountSnapshot)] = []
         for provider in providers {
@@ -43,27 +48,115 @@ final class StatusItemController {
                 keyed.append(("\(provider.id)#\(index)", snapshot))
             }
         }
-        let live = Set(keyed.map(\.0))
+        let live = merged ? Set(["merged"]) : Set(keyed.map(\.0))
         for (key, item) in items where !live.contains(key) {
             NSStatusBar.system.removeStatusItem(item)
             items[key] = nil
         }
-        for (key, snapshot) in keyed {
-            let item = items[key] ?? {
-                let created = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-                items[key] = created
-                return created
-            }()
-            if let image = Self.icon(named: snapshot.glyph) {
-                item.button?.image = image
-                item.button?.imagePosition = .imageLeading
-                item.button?.title = " \(Format.barText(snapshot))"
-            } else {
-                item.button?.title = "\(snapshot.glyph) \(Format.barText(snapshot))"
+        if merged {
+            let item = statusItem(for: "merged")
+            item.button?.title = ""
+            item.button?.image = mergedImage(keyed.map(\.1))
+            item.button?.imagePosition = .imageOnly
+            item.menu = mergedMenu(keyed.map(\.1))
+        } else {
+            for (key, snapshot) in keyed {
+                let item = statusItem(for: key)
+                if let image = Self.icon(named: snapshot.glyph) {
+                    item.button?.image = image
+                    item.button?.imagePosition = .imageLeading
+                    item.button?.title = " \(Format.barText(snapshot))"
+                } else {
+                    item.button?.title = "\(snapshot.glyph) \(Format.barText(snapshot))"
+                }
+                item.menu = menu(for: snapshot)
             }
-            item.menu = menu(for: snapshot)
         }
-        Log.write("render \(keyed.map { "\($0.0)=\($0.1.glyph) \(Format.barText($0.1))" }.joined(separator: " | "))")
+        Log.write("render merged=\(merged) \(keyed.map { "\($0.0)=\(Format.barText($0.1))" }.joined(separator: " | "))")
+    }
+
+    private func statusItem(for key: String) -> NSStatusItem {
+        if let existing = items[key] { return existing }
+        let created = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        items[key] = created
+        return created
+    }
+
+    private func mergedImage(_ all: [AccountSnapshot]) -> NSImage {
+        let font = NSFont.menuBarFont(ofSize: 0)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.black]
+        let iconSize: CGFloat = 14
+        let gap: CGFloat = 3
+        let groupGap: CGFloat = 9
+
+        let pieces = all.map { snapshot -> (NSImage?, NSAttributedString) in
+            (Self.icon(named: snapshot.glyph),
+             NSAttributedString(string: Format.compact(snapshot), attributes: attributes))
+        }
+        let width = pieces.reduce(CGFloat(0)) { total, piece in
+            total + (piece.0 == nil ? 0 : iconSize + gap) + piece.1.size().width + groupGap
+        } - groupGap
+        let height = max(iconSize, font.capHeight + 6)
+
+        let image = NSImage(size: NSSize(width: max(width, 1), height: height), flipped: false) { _ in
+            var x: CGFloat = 0
+            for (icon, text) in pieces {
+                if let icon {
+                    icon.draw(in: NSRect(x: x, y: (height - iconSize) / 2, width: iconSize, height: iconSize))
+                    x += iconSize + gap
+                }
+                let size = text.size()
+                text.draw(at: NSPoint(x: x, y: (height - size.height) / 2))
+                x += size.width + groupGap
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    private func mergedMenu(_ all: [AccountSnapshot]) -> NSMenu {
+        let menu = NSMenu()
+        for snapshot in all {
+            let header = NSMenuItem(title: "\(snapshot.accountLabel)", action: nil, keyEquivalent: "")
+            header.image = Self.icon(named: snapshot.glyph)
+            header.isEnabled = false
+            menu.addItem(header)
+            if let error = snapshot.error {
+                let item = NSMenuItem(title: "    \(error)", action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+            }
+            for window in snapshot.windows {
+                let line = window.label.isEmpty ? Format.percent(window.percentUsed) : "\(window.label): \(Format.percent(window.percentUsed))"
+                let item = NSMenuItem(title: "    \(line)", action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                menu.addItem(item)
+                if let reset = window.resetsAt {
+                    let sub = NSMenuItem(title: "        resets \(Format.fullReset(reset))", action: nil, keyEquivalent: "")
+                    sub.isEnabled = false
+                    menu.addItem(sub)
+                }
+            }
+            menu.addItem(.separator())
+        }
+        menu.addItem(withTitle: "Refresh", action: #selector(refreshNow), keyEquivalent: "r").target = self
+        addSplitToggle(to: menu)
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit UsageBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        return menu
+    }
+
+    private func addSplitToggle(to menu: NSMenu) {
+        let toggle = NSMenuItem(title: merged ? "Split into separate items" : "Merge into one item",
+                                action: #selector(toggleMerged), keyEquivalent: "")
+        toggle.target = self
+        menu.addItem(toggle)
+    }
+
+    @objc private func toggleMerged() {
+        merged.toggle()
+        render()
     }
 
     private func menu(for snapshot: AccountSnapshot) -> NSMenu {
@@ -95,6 +188,7 @@ final class StatusItemController {
         updated.isEnabled = false
         menu.addItem(updated)
         menu.addItem(withTitle: "Refresh", action: #selector(refreshNow), keyEquivalent: "r").target = self
+        addSplitToggle(to: menu)
 
         let provider = providers.first { $0.id == snapshot.providerID }
         if provider != nil {
