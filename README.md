@@ -4,6 +4,11 @@ macOS menu bar meter for Claude, Codex and Copilot subscription usage. One statu
 
     ./build.sh && open UsageBar.app
 
+## Homebrew
+
+    brew tap gregorjan/tap
+    brew install --cask usagebar
+
 ## What it does
 
 - Refreshes every 5 minutes, and on demand from any item's Refresh entry.
