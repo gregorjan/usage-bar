@@ -6,6 +6,7 @@ final class StatusItemController {
     private let providers: [any UsageProvider]
     private var timer: Timer?
     private var snapshots: [AccountSnapshot] = []
+    private var lastPercent: [String: Double] = [:]
 
     init(providers: [any UsageProvider]) {
         self.providers = providers
@@ -17,6 +18,7 @@ final class StatusItemController {
                             windows: [], error: "Loading…", fetchedAt: Date())
         }
         render()
+        Notify.shared.start()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -28,9 +30,25 @@ final class StatusItemController {
             Task { @MainActor in
                 let fresh = await provider.fetch()
                 Log.write("fetch \(provider.id) -> \(fresh.count) [\(fresh.map { "\($0.accountID):\($0.error ?? Format.barText($0))" }.joined(separator: ", "))]")
+                self.noteResets(fresh)
                 self.snapshots.removeAll { $0.providerID == provider.id }
                 self.snapshots.append(contentsOf: fresh)
                 self.render()
+            }
+        }
+    }
+
+    private func noteResets(_ fresh: [AccountSnapshot]) {
+        for snapshot in fresh where snapshot.error == nil {
+            for window in snapshot.windows {
+                guard let used = window.percentUsed else { continue }
+                let key = "\(snapshot.itemKey)/\(window.label)"
+                let previous = lastPercent[key]
+                lastPercent[key] = used
+                guard let previous, previous >= Format.nearLimit, used < previous else { continue }
+                let what = window.label.isEmpty ? "Usage" : "\(window.label) window"
+                Notify.shared.post(title: "\(snapshot.accountLabel) limit reset",
+                                   body: "\(what) back to \(Format.percent(used))")
             }
         }
     }
@@ -138,6 +156,7 @@ final class StatusItemController {
                     menu.addItem(sub)
                 }
             }
+            addAccountActions(for: snapshot, to: menu, indent: "    ")
             menu.addItem(.separator())
         }
         menu.addItem(withTitle: "Refresh", action: #selector(refreshNow), keyEquivalent: "r").target = self
@@ -145,6 +164,22 @@ final class StatusItemController {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit UsageBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu
+    }
+
+    private func addAccountActions(for snapshot: AccountSnapshot, to menu: NSMenu, indent: String) {
+        guard let provider = providers.first(where: { $0.id == snapshot.providerID }) else { return }
+        let signIn = NSMenuItem(title: indent + (snapshot.error == nil ? "Sign in another \(provider.displayName) account…" : "Sign in to \(provider.displayName)…"),
+                                action: #selector(signIn(_:)), keyEquivalent: "")
+        signIn.target = self
+        signIn.representedObject = provider.id
+        menu.addItem(signIn)
+
+        if snapshot.error == nil {
+            let signOut = NSMenuItem(title: indent + "Sign out \(snapshot.accountLabel)", action: #selector(signOut(_:)), keyEquivalent: "")
+            signOut.target = self
+            signOut.representedObject = snapshot
+            menu.addItem(signOut)
+        }
     }
 
     private func addSplitToggle(to menu: NSMenu) {
@@ -190,21 +225,7 @@ final class StatusItemController {
         menu.addItem(withTitle: "Refresh", action: #selector(refreshNow), keyEquivalent: "r").target = self
         addSplitToggle(to: menu)
 
-        let provider = providers.first { $0.id == snapshot.providerID }
-        if provider != nil {
-            let signIn = NSMenuItem(title: snapshot.error == nil ? "Sign in another account…" : "Sign in…",
-                                    action: #selector(signIn(_:)), keyEquivalent: "")
-            signIn.target = self
-            signIn.representedObject = snapshot.providerID
-            menu.addItem(signIn)
-
-            if snapshot.error == nil {
-                let signOut = NSMenuItem(title: "Sign out \(snapshot.accountLabel)", action: #selector(signOut(_:)), keyEquivalent: "")
-                signOut.target = self
-                signOut.representedObject = snapshot
-                menu.addItem(signOut)
-            }
-        }
+        addAccountActions(for: snapshot, to: menu, indent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit UsageBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         return menu

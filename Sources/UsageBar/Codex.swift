@@ -44,10 +44,11 @@ actor CodexProvider: UsageProvider {
             .init(name: "id_token_add_organizations", value: "true"),
             .init(name: "state", value: pkce.verifier),
         ]
+        if await !accountIDs.isEmpty { components.queryItems?.append(.init(name: "prompt", value: "login")) }
 
         let loopback = Loopback()
         async let callback = loopback.waitForCode(port: port, path: callbackPath)
-        await MainActor.run { NSWorkspace.shared.open(components.url!) }
+        await PasteFlow.open(components.url!)
         let params = try await callback
         guard let code = params["code"] else { throw ProviderError.malformed("no code in callback") }
 
