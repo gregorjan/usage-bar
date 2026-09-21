@@ -9,6 +9,8 @@ macOS menu bar meter for Claude, Codex and Copilot subscription usage. One statu
     brew tap gregorjan/tap
     brew install --cask usagebar
 
+The cask is unsigned — I am not willing to pay $99 for an Apple Developer ID — so macOS blocks the first launch. Allow it in Applications: Control-click UsageBar.app, choose Open, then Open again. Later launches work normally.
+
 ## What it does
 
 - Refreshes every 5 minutes, and on demand from any item's Refresh entry.

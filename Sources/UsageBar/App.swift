@@ -168,13 +168,14 @@ final class StatusItemController {
 
     private func addAccountActions(for snapshot: AccountSnapshot, to menu: NSMenu, indent: String) {
         guard let provider = providers.first(where: { $0.id == snapshot.providerID }) else { return }
-        let signIn = NSMenuItem(title: indent + (snapshot.error == nil ? "Sign in another \(provider.displayName) account…" : "Sign in to \(provider.displayName)…"),
+        let signedIn = snapshot.accountID != "-"
+        let signIn = NSMenuItem(title: indent + (signedIn ? "Sign in another \(provider.displayName) account…" : "Sign in to \(provider.displayName)…"),
                                 action: #selector(signIn(_:)), keyEquivalent: "")
         signIn.target = self
         signIn.representedObject = provider.id
         menu.addItem(signIn)
 
-        if snapshot.error == nil {
+        if signedIn {
             let signOut = NSMenuItem(title: indent + "Sign out \(snapshot.accountLabel)", action: #selector(signOut(_:)), keyEquivalent: "")
             signOut.target = self
             signOut.representedObject = snapshot
