@@ -42,7 +42,7 @@ actor ClaudeProvider: UsageProvider {
         await store.delete(key: keyPrefix + accountID)
     }
 
-    func signIn(showing _: @Sendable @escaping (String, URL) -> Void) async throws {
+    func signIn(replacing accountID: String?, showing _: @Sendable @escaping (String, URL) -> Void) async throws {
         let pkce = PKCE()
         var components = URLComponents(string: "https://claude.ai/oauth/authorize")!
         components.queryItems = [
@@ -55,7 +55,7 @@ actor ClaudeProvider: UsageProvider {
             .init(name: "code_challenge_method", value: "S256"),
             .init(name: "state", value: pkce.verifier),
         ]
-        let pasted = try await PasteFlow.run(url: components.url!, provider: displayName)
+        let pasted = try await PasteFlow.run(url: components.url!, provider: displayName, accountID: accountID)
         let parts = pasted.split(separator: "#", maxSplits: 1).map(String.init)
         guard let code = parts.first, !code.isEmpty else { throw ProviderError.malformed("empty code") }
 
@@ -70,8 +70,15 @@ actor ClaudeProvider: UsageProvider {
                 "state": parts.count > 1 ? parts[1] : pkce.verifier,
             ]
         ))
-        guard let access = body["access_token"] as? String else { throw ProviderError.malformed("no access_token") }
-        let label = ((body["account"] as? [String: Any])?["email_address"] as? String) ?? "claude"
+        try await storeAuthorization(body, replacing: accountID)
+    }
+
+    func storeAuthorization(_ body: [String: Any], replacing accountID: String?) async throws {
+        guard let access = body["access_token"] as? String, !access.isEmpty else {
+            throw ProviderError.malformed("no access_token")
+        }
+        let email = ((body["account"] as? [String: Any])?["email_address"] as? String) ?? "claude"
+        let label = try AccountIdentity.storageID(authenticated: email, replacing: accountID)
         let expires = (body["expires_in"] as? Double).map { Date().addingTimeInterval($0) }
         credentialGeneration[label, default: 0] &+= 1
         try await store.save(OAuthToken(accessToken: access, refreshToken: body["refresh_token"] as? String,

@@ -157,7 +157,7 @@ final class StatusItemController {
         return image
     }
 
-    private func mergedMenu(_ all: [AccountSnapshot]) -> NSMenu {
+    func mergedMenu(_ all: [AccountSnapshot]) -> NSMenu {
         let menu = NSMenu()
         for snapshot in all {
             let header = NSMenuItem(title: "\(snapshot.accountLabel)", action: nil, keyEquivalent: "")
@@ -186,7 +186,7 @@ final class StatusItemController {
             addAccountActions(for: snapshot, to: menu, indent: "    ")
             menu.addItem(.separator())
         }
-        menu.addItem(withTitle: "Refresh", action: #selector(refreshNow), keyEquivalent: "r").target = self
+        menu.addItem(withTitle: "Refresh usage", action: #selector(refreshNow), keyEquivalent: "r").target = self
         addSplitToggle(to: menu)
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit UsageBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -196,6 +196,13 @@ final class StatusItemController {
     private func addAccountActions(for snapshot: AccountSnapshot, to menu: NSMenu, indent: String) {
         guard let provider = providers.first(where: { $0.id == snapshot.providerID }) else { return }
         let signedIn = snapshot.accountID != "-"
+        if signedIn {
+            let reconnect = NSMenuItem(title: indent + "Reconnect \(provider.displayName)…",
+                                      action: #selector(reconnect(_:)), keyEquivalent: "")
+            reconnect.target = self
+            reconnect.representedObject = snapshot
+            menu.addItem(reconnect)
+        }
         let signIn = NSMenuItem(title: indent + (signedIn ? "Sign in another \(provider.displayName) account…" : "Sign in to \(provider.displayName)…"),
                                 action: #selector(signIn(_:)), keyEquivalent: "")
         signIn.target = self
@@ -222,7 +229,7 @@ final class StatusItemController {
         render()
     }
 
-    private func menu(for snapshot: AccountSnapshot) -> NSMenu {
+    func menu(for snapshot: AccountSnapshot) -> NSMenu {
         let menu = NSMenu()
         let header = NSMenuItem(title: "\(snapshot.accountLabel)", action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -251,7 +258,7 @@ final class StatusItemController {
         let updated = NSMenuItem(title: "\(updateLabel) \(Format.fullReset(snapshot.fetchedAt))", action: nil, keyEquivalent: "")
         updated.isEnabled = false
         menu.addItem(updated)
-        menu.addItem(withTitle: "Refresh", action: #selector(refreshNow), keyEquivalent: "r").target = self
+        menu.addItem(withTitle: "Refresh usage", action: #selector(refreshNow), keyEquivalent: "r").target = self
         addSplitToggle(to: menu)
 
         addAccountActions(for: snapshot, to: menu, indent: "")
@@ -275,16 +282,29 @@ final class StatusItemController {
     @objc private func refreshNow() { refresh() }
 
     @objc private func signIn(_ sender: NSMenuItem) {
-        guard let providerID = sender.representedObject as? String,
-              let provider = providers.first(where: { $0.id == providerID }) else { return }
+        guard let providerID = sender.representedObject as? String else { return }
+        authenticate(providerID: providerID, replacing: nil)
+    }
+
+    @objc private func reconnect(_ sender: NSMenuItem) {
+        guard let snapshot = sender.representedObject as? AccountSnapshot else { return }
+        authenticate(providerID: snapshot.providerID, replacing: snapshot.accountID)
+    }
+
+    private func authenticate(providerID: String, replacing accountID: String?) {
+        guard let provider = providers.first(where: { $0.id == providerID }) else { return }
         Task {
             do {
-                try await provider.signIn { code, url in
-                    Task { @MainActor in Self.presentCode(code, url: url, provider: provider.displayName) }
+                try await provider.signIn(replacing: accountID) { code, url in
+                    Task { @MainActor in
+                        Self.presentCode(code, url: url, provider: provider.displayName, accountID: accountID)
+                    }
                 }
-                await MainActor.run { self.refresh() }
+                self.refresh()
+            } catch is CancellationError {
+                // Cancelling a reconnect leaves the existing account untouched.
             } catch {
-                await MainActor.run { Self.presentError(error, provider: provider.displayName) }
+                Self.presentError(error, provider: provider.displayName, reconnecting: accountID != nil)
             }
         }
     }
@@ -298,7 +318,7 @@ final class StatusItemController {
         }
     }
 
-    private static func presentCode(_ code: String, url: URL, provider: String) {
+    private static func presentCode(_ code: String, url: URL, provider: String, accountID: String?) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(code, forType: .string)
         NSLog("UsageBar %@ device code: %@", provider, code)
@@ -310,8 +330,9 @@ final class StatusItemController {
         field.frame = NSRect(x: 0, y: 0, width: 260, height: 40)
 
         let alert = NSAlert()
-        alert.messageText = "\(provider) sign-in"
-        alert.informativeText = "Enter this code at \(url.host ?? url.absoluteString). It stays here until you close this dialog; UsageBar keeps polling in the background."
+        alert.messageText = accountID == nil ? "\(provider) sign-in" : "Reconnect \(provider)"
+        let accountNote = accountID.map { "Authorize as \($0) to update your saved account.\n\n" } ?? ""
+        alert.informativeText = accountNote + "Enter this code at \(url.host ?? url.absoluteString). It stays here until you close this dialog; UsageBar keeps polling in the background."
         alert.accessoryView = field
         alert.addButton(withTitle: "Open browser")
         alert.addButton(withTitle: "Close")
@@ -319,9 +340,9 @@ final class StatusItemController {
         if alert.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(url) }
     }
 
-    private static func presentError(_ error: any Error, provider: String) {
+    private static func presentError(_ error: any Error, provider: String, reconnecting: Bool = false) {
         let alert = NSAlert()
-        alert.messageText = "\(provider) sign-in failed"
+        alert.messageText = reconnecting ? "\(provider) reconnect failed" : "\(provider) sign-in failed"
         alert.informativeText = error.localizedDescription
         alert.runModal()
     }

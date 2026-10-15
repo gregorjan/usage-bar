@@ -13,7 +13,8 @@ The cask is unsigned — I am not willing to pay $99 for an Apple Developer ID �
 
 ## What it does
 
-- Refreshes every 5 minutes, and on demand from any item's Refresh entry.
+- Refreshes every 5 minutes, and on demand from any item's **Refresh usage** entry.
+- **Reconnect Claude…** (also Codex/Copilot) renews authorization for the saved account in place. No sign-out, deletion, or adding another account is needed. Reconnecting as a different account is rejected without changing the saved account.
 - Each provider fetches independently. Failed requests retain last-known usage (also across restarts), marked `⚠︎`; the dropdown and tooltip show the error and last successful update. With no saved reading, an error shows `⚠︎`, not a blank percentage.
 - Access tokens renew automatically. Claude retries once after HTTP 401, and concurrent renewals share one request. Rotated tokens update the Keychain vault in place; failed saves are reported and retried. If the provider invalidates the refresh token itself, live usage cannot resume without fresh authorization.
 - The bar shows percentages only. Reset times live in the dropdown, except for a window at 90% or more, which shows its reset inline.

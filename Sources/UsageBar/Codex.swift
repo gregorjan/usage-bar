@@ -31,7 +31,7 @@ actor CodexProvider: UsageProvider {
         await TokenStore.shared.delete(key: keyPrefix + accountID)
     }
 
-    func signIn(showing _: @Sendable @escaping (String, URL) -> Void) async throws {
+    func signIn(replacing existingAccountID: String?, showing _: @Sendable @escaping (String, URL) -> Void) async throws {
         let pkce = PKCE()
         var components = URLComponents(string: "https://auth.openai.com/oauth/authorize")!
         components.queryItems = [
@@ -44,7 +44,11 @@ actor CodexProvider: UsageProvider {
             .init(name: "id_token_add_organizations", value: "true"),
             .init(name: "state", value: pkce.verifier),
         ]
-        if await !accountIDs.isEmpty { components.queryItems?.append(.init(name: "prompt", value: "login")) }
+        if let existingAccountID {
+            components.queryItems?.append(.init(name: "login_hint", value: existingAccountID))
+        } else if await !accountIDs.isEmpty {
+            components.queryItems?.append(.init(name: "prompt", value: "login"))
+        }
 
         let loopback = Loopback()
         async let callback = loopback.waitForCode(port: port, path: callbackPath)
@@ -66,7 +70,8 @@ actor CodexProvider: UsageProvider {
         else { throw ProviderError.malformed("no tokens in response") }
 
         let claims = Self.claims(body["id_token"] as? String)
-        let label = (claims["email"] as? String) ?? "codex"
+        let label = try AccountIdentity.storageID(authenticated: (claims["email"] as? String) ?? "codex",
+                                                  replacing: existingAccountID)
         let accountID = ((claims["https://api.openai.com/auth"] as? [String: Any])?["chatgpt_account_id"] as? String)
         try await TokenStore.shared.save(CodexToken(accessToken: access, refreshToken: refresh, accountID: accountID,
                        expiresAt: (body["expires_in"] as? Double).map { Date().addingTimeInterval($0) },

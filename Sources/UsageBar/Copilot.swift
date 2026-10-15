@@ -23,7 +23,7 @@ actor CopilotProvider: UsageProvider {
         await TokenStore.shared.delete(key: keyPrefix + accountID)
     }
 
-    func signIn(showing: @Sendable @escaping (String, URL) -> Void) async throws {
+    func signIn(replacing accountID: String?, showing: @Sendable @escaping (String, URL) -> Void) async throws {
         let start = try await Net.json(Net.form(
             URL(string: "https://github.com/login/device/code")!,
             ["client_id": clientID, "scope": "read:user"]
@@ -48,7 +48,8 @@ actor CopilotProvider: UsageProvider {
                 ]
             ))
             if let token = poll["access_token"] as? String {
-                let login = try await self.login(for: token)
+                let authenticated = try await self.login(for: token)
+                let login = try AccountIdentity.storageID(authenticated: authenticated, replacing: accountID)
                 try await TokenStore.shared.save(CopilotToken(accessToken: token, login: login), key: keyPrefix + login)
                 return
             }
