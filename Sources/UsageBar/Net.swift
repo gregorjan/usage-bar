@@ -9,11 +9,19 @@ enum Net {
     }()
 
     static func json(_ request: URLRequest) async throws -> [String: Any] {
+        try decodeJSON(await data(request))
+    }
+
+    static func data(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: request)
         let code = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
             throw ProviderError.http(code, String(decoding: data.prefix(200), as: UTF8.self))
         }
+        return data
+    }
+
+    static func decodeJSON(_ data: Data) throws -> [String: Any] {
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw ProviderError.malformed("not a JSON object")
         }

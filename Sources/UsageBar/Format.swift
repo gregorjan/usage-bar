@@ -9,15 +9,16 @@ enum Format {
     }
 
     static func barText(_ snapshot: AccountSnapshot) -> String {
-        guard snapshot.error == nil, !snapshot.windows.isEmpty else { return "—" }
+        guard !snapshot.windows.isEmpty else { return snapshot.error == "Loading…" ? "…" : "⚠︎" }
         return snapshot.windows.map { window in
             let prefix = window.label.isEmpty ? "" : "\(window.label) "
+            if snapshot.error != nil { return prefix + percent(window.percentUsed) }
             guard let used = window.percentUsed, used >= nearLimit, let reset = window.resetsAt else {
                 return prefix + percent(window.percentUsed)
             }
             guard used.rounded() < 100 else { return "\(prefix)↻\(shortReset(reset))" }
             return "\(prefix)\(percent(used)) ↻\(shortReset(reset))"
-        }.joined(separator: " ")
+        }.joined(separator: " ") + (snapshot.error == nil ? "" : " ⚠︎")
     }
 
     static func shortReset(_ date: Date) -> String {
@@ -40,12 +41,12 @@ enum Format {
     }
 
     static func compact(_ snapshot: AccountSnapshot) -> String {
-        guard snapshot.error == nil, !snapshot.windows.isEmpty else { return "—" }
+        guard !snapshot.windows.isEmpty else { return snapshot.error == "Loading…" ? "…" : "⚠︎" }
         return snapshot.windows.map { window in
-            guard let used = window.percentUsed, used.rounded() >= 100, let reset = window.resetsAt else {
+            guard snapshot.error == nil, let used = window.percentUsed, used.rounded() >= 100, let reset = window.resetsAt else {
                 return percent(window.percentUsed).replacingOccurrences(of: "%", with: "")
             }
             return "↻\(shortReset(reset))"
-        }.joined(separator: "/")
+        }.joined(separator: "/") + (snapshot.error == nil ? "" : "⚠︎")
     }
 }

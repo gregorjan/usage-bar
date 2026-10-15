@@ -5,6 +5,7 @@ let package = Package(
     name: "UsageBar",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "UsageBar", path: "Sources/UsageBar")
+        .executableTarget(name: "UsageBar", path: "Sources/UsageBar"),
+        .testTarget(name: "UsageBarTests", dependencies: ["UsageBar"])
     ]
 )

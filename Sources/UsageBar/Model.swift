@@ -1,12 +1,12 @@
 import Foundation
 
-struct UsageWindow: Sendable, Equatable {
+struct UsageWindow: Codable, Sendable, Equatable {
     let label: String
     let percentUsed: Double?
     let resetsAt: Date?
 }
 
-struct AccountSnapshot: Sendable, Equatable {
+struct AccountSnapshot: Codable, Sendable, Equatable {
     let providerID: String
     let glyph: String
     let accountID: String
@@ -20,12 +20,14 @@ struct AccountSnapshot: Sendable, Equatable {
 
 enum ProviderError: LocalizedError {
     case notAuthenticated
+    case sessionExpired
     case http(Int, String)
     case malformed(String)
 
     var errorDescription: String? {
         switch self {
         case .notAuthenticated: "Not signed in"
+        case .sessionExpired: "Claude rejected the saved refresh token. Session authorization has expired."
         case let .http(code, body): "HTTP \(code)\(body.isEmpty ? "" : ": \(body)")"
         case let .malformed(what): "Unexpected response: \(what)"
         }

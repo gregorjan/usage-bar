@@ -49,7 +49,7 @@ actor CopilotProvider: UsageProvider {
             ))
             if let token = poll["access_token"] as? String {
                 let login = try await self.login(for: token)
-                await TokenStore.shared.save(CopilotToken(accessToken: token, login: login), key: keyPrefix + login)
+                try await TokenStore.shared.save(CopilotToken(accessToken: token, login: login), key: keyPrefix + login)
                 return
             }
             if let error = poll["error"] as? String, error != "authorization_pending" {

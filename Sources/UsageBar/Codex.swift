@@ -68,7 +68,7 @@ actor CodexProvider: UsageProvider {
         let claims = Self.claims(body["id_token"] as? String)
         let label = (claims["email"] as? String) ?? "codex"
         let accountID = ((claims["https://api.openai.com/auth"] as? [String: Any])?["chatgpt_account_id"] as? String)
-        await TokenStore.shared.save(CodexToken(accessToken: access, refreshToken: refresh, accountID: accountID,
+        try await TokenStore.shared.save(CodexToken(accessToken: access, refreshToken: refresh, accountID: accountID,
                        expiresAt: (body["expires_in"] as? Double).map { Date().addingTimeInterval($0) },
                        label: label),
             key: keyPrefix + label)
@@ -143,7 +143,7 @@ actor CodexProvider: UsageProvider {
                 stored.accessToken = access
                 stored.refreshToken = (body["refresh_token"] as? String) ?? stored.refreshToken
                 stored.expiresAt = (body["expires_in"] as? Double).map { Date().addingTimeInterval($0) }
-                await TokenStore.shared.save(stored, key: keyPrefix + accountID)
+                try await TokenStore.shared.save(stored, key: keyPrefix + accountID)
             }
         }
         return stored

@@ -7,15 +7,21 @@ final class StatusItemController {
     private var timer: Timer?
     private var snapshots: [AccountSnapshot] = []
     private var lastPercent: [String: Double] = [:]
+    private var refreshing: Set<String> = []
+    private var refreshAgain: Set<String> = []
+    private var usageCache = SnapshotCache()
 
     init(providers: [any UsageProvider]) {
         self.providers = providers
     }
 
     func start() {
-        snapshots = providers.map {
-            AccountSnapshot(providerID: $0.id, glyph: $0.glyph, accountID: "-", accountLabel: $0.displayName,
-                            windows: [], error: "Loading…", fetchedAt: Date())
+        snapshots = providers.flatMap { provider -> [AccountSnapshot] in
+            let saved = usageCache.restored(providerID: provider.id)
+            if !saved.isEmpty { return saved }
+            return [AccountSnapshot(providerID: provider.id, glyph: provider.glyph, accountID: "-",
+                                    accountLabel: provider.displayName, windows: [],
+                                    error: "Loading…", fetchedAt: Date())]
         }
         render()
         Notify.shared.start()
@@ -27,13 +33,21 @@ final class StatusItemController {
 
     func refresh() {
         for provider in providers {
+            guard refreshing.insert(provider.id).inserted else {
+                refreshAgain.insert(provider.id)
+                continue
+            }
             Task { @MainActor in
-                let fresh = await provider.fetch()
-                Log.write("fetch \(provider.id) -> \(fresh.count) [\(fresh.map { "\($0.accountID):\($0.error ?? Format.barText($0))" }.joined(separator: ", "))]")
-                self.noteResets(fresh)
-                self.snapshots.removeAll { $0.providerID == provider.id }
-                self.snapshots.append(contentsOf: fresh)
-                self.render()
+                defer { self.refreshing.remove(provider.id) }
+                repeat {
+                    self.refreshAgain.remove(provider.id)
+                    let fresh = await provider.fetch()
+                    Log.write("fetch \(provider.id) -> \(fresh.count) [\(fresh.map { "\($0.accountID):\($0.error ?? Format.barText($0))" }.joined(separator: ", "))]")
+                    self.noteResets(fresh)
+                    self.snapshots.removeAll { $0.providerID == provider.id }
+                    self.snapshots.append(contentsOf: self.usageCache.apply(fresh, providerID: provider.id))
+                    self.render()
+                } while self.refreshAgain.contains(provider.id)
             }
         }
     }
@@ -74,12 +88,14 @@ final class StatusItemController {
         if merged {
             let item = statusItem(for: "merged")
             item.button?.title = ""
+            item.button?.toolTip = keyed.map { Self.tooltip($0.1) }.joined(separator: "\n")
             item.button?.image = mergedImage(keyed.map(\.1))
             item.button?.imagePosition = .imageOnly
             item.menu = mergedMenu(keyed.map(\.1))
         } else {
             for (key, snapshot) in keyed {
                 let item = statusItem(for: key)
+                item.button?.toolTip = Self.tooltip(snapshot)
                 if let image = Self.icon(named: snapshot.glyph) {
                     item.button?.image = image
                     item.button?.imagePosition = .imageLeading
@@ -91,6 +107,14 @@ final class StatusItemController {
             }
         }
         Log.write("render merged=\(merged) \(keyed.map { "\($0.0)=\(Format.barText($0.1))" }.joined(separator: " | "))")
+    }
+
+    private static func tooltip(_ snapshot: AccountSnapshot) -> String {
+        guard !snapshot.windows.isEmpty else {
+            return "\(snapshot.accountLabel): \(snapshot.error ?? "No usage available")"
+        }
+        let updated = "\(snapshot.accountLabel): \(snapshot.error == nil ? "Updated" : "Last successful update") \(Format.fullReset(snapshot.fetchedAt))"
+        return updated + (snapshot.error.map { "\n\($0)" } ?? "")
     }
 
     private func statusItem(for key: String) -> NSStatusItem {
@@ -156,6 +180,9 @@ final class StatusItemController {
                     menu.addItem(sub)
                 }
             }
+            let updated = NSMenuItem(title: "    \(snapshot.error == nil ? "Updated" : "Last successful update") \(Format.fullReset(snapshot.fetchedAt))", action: nil, keyEquivalent: "")
+            updated.isEnabled = false
+            if !snapshot.windows.isEmpty { menu.addItem(updated) }
             addAccountActions(for: snapshot, to: menu, indent: "    ")
             menu.addItem(.separator())
         }
@@ -220,7 +247,8 @@ final class StatusItemController {
         }
 
         menu.addItem(.separator())
-        let updated = NSMenuItem(title: "Updated \(Format.shortResetTime(snapshot.fetchedAt))", action: nil, keyEquivalent: "")
+        let updateLabel = snapshot.windows.isEmpty ? "Checked" : (snapshot.error == nil ? "Updated" : "Last successful update")
+        let updated = NSMenuItem(title: "\(updateLabel) \(Format.fullReset(snapshot.fetchedAt))", action: nil, keyEquivalent: "")
         updated.isEnabled = false
         menu.addItem(updated)
         menu.addItem(withTitle: "Refresh", action: #selector(refreshNow), keyEquivalent: "r").target = self

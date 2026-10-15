@@ -4,17 +4,29 @@ import Security
 enum Keychain {
     static let service = "to.gregor.usagebar"
 
-    static func save(_ data: Data, account: String) {
+    struct WriteError: LocalizedError {
+        let status: OSStatus
+        var errorDescription: String? {
+            "Could not save credentials: \(SecCopyErrorMessageString(status, nil) as String? ?? String(status))"
+        }
+    }
+
+    static func save(_ data: Data, account: String) throws {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(base as CFDictionary)
-        var add = base
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
+        // Updating preserves the item's ACL and never destroys the old vault on failure.
+        let attributes = [kSecValueData as String: data]
+        var status = SecItemUpdate(base as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            var add = base
+            add[kSecValueData as String] = data
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+            status = SecItemAdd(add as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw WriteError(status: status) }
     }
 
     static func load(account: String) -> Data? {
@@ -53,9 +65,8 @@ enum Keychain {
             .sorted()
     }
 
-    static func saveJSON(_ value: some Encodable, account: String) {
-        guard let data = try? JSONEncoder().encode(value) else { return }
-        save(data, account: account)
+    static func saveJSON(_ value: some Encodable, account: String) throws {
+        try save(JSONEncoder().encode(value), account: account)
     }
 
     static func loadJSON<T: Decodable>(_ type: T.Type, account: String) -> T? {
